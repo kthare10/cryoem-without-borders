@@ -1,0 +1,172 @@
+{
+  "name": "CryoEM Without Borders",
+  "description": "Provisions a multi-GPU FABRIC VM (input: cryoem-without-borders storage volume; MotionCor3, CTFFIND4, RELION 5) plus a receiver VM at FIU, a stand-in for CAPE, on a dedicated L2 link (shared or ConnectX NIC). The notebook pre-processes the data and transfers the results to FIU. The slice is kept by default.",
+  "description_long": "Bring-up weave for the single-particle cryoEM pre-processing demo. It picks a host with NUM_GPUS free GPUs of one model (A40 > A30 > RTX6000 > T4, from live per-host availability), creates one VM, attaches the CryoEM Without Borders CephFS project volume (the Globus collection, mounted under /mnt/cephfs/west/…_cryoem-without-borders), installs the NVIDIA driver + CUDA, builds MotionCor3 and RELION 5.0, installs CTFFIND 4.1.14 and a Python preview environment, adds a CPU receiver VM at RECEIVER_SITE (FIU; to be replaced by CAPE) connected by a dedicated site-to-site L2 link (XFER, private subnet, TCP-tuned, jumbo frames when the path allows) with SSH trust from the GPU node, extends the lease, writes results/slice_info.json and exits. It waits once for the slice to reach StableOK and does not poll after that. The experiment (frame alignment with MotionCor3 on all GPUs, CTF estimation with CTFFIND4, before/after comparison figures, iperf3 baseline + rsync transfer of the results to the receiver's local disk with checksum verification, optional RELION pipeline) lives in cryoem_experiment.ipynb. With KEEP_SLICE=true (default) neither Stop nor the cleanup script deletes the slice.",
+  "run_script": "weave.sh",
+  "log_file": "weave.log",
+  "cleanup_script": "weave_cleanup.sh",
+  "category": "weave",
+  "format": "fabric-slice-v1",
+  "created": "2026-10-12T00:00:00Z",
+  "args": [
+    {
+      "name": "SLICE_NAME",
+      "label": "Slice Name",
+      "type": "string",
+      "required": true,
+      "default": "cryoem-demo",
+      "description": "FABRIC slice name (the notebook connects to this)"
+    },
+    {
+      "name": "NUM_GPUS",
+      "label": "GPUs on the node",
+      "type": "number",
+      "required": true,
+      "default": 2,
+      "description": "GPUs attached to the VM (all from one host). MotionCor3 spreads movies across them."
+    },
+    {
+      "name": "GPU_MODEL",
+      "label": "GPU Model",
+      "type": "string",
+      "required": false,
+      "default": "auto",
+      "description": "auto = best model with NUM_GPUS free on one host; or GPU_A40 | GPU_A30 | GPU_RTX6000 | GPU_TeslaT4"
+    },
+    {
+      "name": "SITE",
+      "label": "Site",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "description": "Pin to a FABRIC site (blank = discover from GPU availability)"
+    },
+    {
+      "name": "EXCLUDE_SITES",
+      "label": "Exclude Sites",
+      "type": "string",
+      "required": false,
+      "default": "",
+      "description": "Comma-separated sites to skip during discovery"
+    },
+    {
+      "name": "CORES",
+      "label": "Cores",
+      "type": "number",
+      "required": false,
+      "default": 16,
+      "description": "VM cores"
+    },
+    {
+      "name": "RAM",
+      "label": "RAM (GB)",
+      "type": "number",
+      "required": false,
+      "default": 64,
+      "description": "VM memory"
+    },
+    {
+      "name": "DISK",
+      "label": "Disk (GB)",
+      "type": "number",
+      "required": false,
+      "default": 500,
+      "description": "Local scratch disk (outputs go to ~/cryoem-work). Max 1000 GB; the whole dataset (§7b) needs ~760 GB, so at 500 GB set FULL_MAX in the notebook."
+    },
+    {
+      "name": "RECEIVER_SITE",
+      "label": "Receiver Site",
+      "type": "string",
+      "required": false,
+      "default": "FIU",
+      "description": "Site of the downstream node that receives the processed data (FIU now; CAPE later). Blank = no receiver."
+    },
+    {
+      "name": "RECEIVER_CORES",
+      "label": "Receiver Cores",
+      "type": "number",
+      "required": false,
+      "default": 8,
+      "description": "Receiver VM cores (parallel rsync streams and checksum verification use them)"
+    },
+    {
+      "name": "RECEIVER_RAM",
+      "label": "Receiver RAM (GB)",
+      "type": "number",
+      "required": false,
+      "default": 32,
+      "description": "Receiver VM memory"
+    },
+    {
+      "name": "RECEIVER_DISK",
+      "label": "Receiver Disk (GB)",
+      "type": "number",
+      "required": false,
+      "default": 500,
+      "description": "Receiver local disk; transferred results land in ~/cryoem-inbox. Max 1000 GB; the whole-dataset results need ~760 GB."
+    },
+    {
+      "name": "XFER_SUBNET",
+      "label": "Transfer Subnet",
+      "type": "string",
+      "required": false,
+      "default": "192.168.100.0/24",
+      "description": "Private subnet of the dedicated L2 transfer link"
+    },
+    {
+      "name": "XFER_NIC",
+      "label": "Transfer NIC",
+      "type": "string",
+      "required": false,
+      "default": "NIC_Basic",
+      "description": "NIC on both ends of the XFER link: NIC_Basic (shared) | NIC_ConnectX_5 (25G x2) | NIC_ConnectX_6 (100G x2) | NIC_ConnectX_7_100. ConnectX needs the matching project tag (e.g. Component.SmartNIC_ConnectX_5); FIU has ConnectX-5 only."
+    },
+    {
+      "name": "PIN_CPU",
+      "label": "CPU pinning",
+      "type": "string",
+      "required": false,
+      "default": "true",
+      "description": "true (default) = pin both VMs' vCPUs to host cores on the XFER NIC's NUMA node (CPU pinning only; no memory tuning, no restart). false = skip. On the GPU node this can move vCPUs away from the GPUs' NUMA node."
+    },
+    {
+      "name": "CUDA_VERSION",
+      "label": "CUDA Toolkit",
+      "type": "string",
+      "required": false,
+      "default": "12.4",
+      "description": "CUDA 12.x toolkit used to build MotionCor3 and RELION"
+    },
+    {
+      "name": "INSTALL_RELION",
+      "label": "Build RELION 5.0",
+      "type": "string",
+      "required": false,
+      "default": "true",
+      "description": "Also build RELION 5.0 (CUDA, no GUI). Adds ~20 min. MotionCor3/CTFFIND work without it."
+    },
+    {
+      "name": "LEASE_DAYS",
+      "label": "Lease (days)",
+      "type": "number",
+      "required": false,
+      "default": 14,
+      "description": "Lease is extended to this many days from now after bring-up"
+    },
+    {
+      "name": "KEEP_SLICE",
+      "label": "Keep Slice",
+      "type": "string",
+      "required": false,
+      "default": "true",
+      "description": "true = Stop / cleanup never delete the slice. false = cleanup deletes it."
+    }
+  ],
+  "nodes": [],
+  "networks": [],
+  "artifact_uuid": "bfd7f4c3-fc29-46ca-9146-628f4b279ca2",
+  "source": "artifact-manager",
+  "tags": [
+    "loomai:weave"
+  ]
+}

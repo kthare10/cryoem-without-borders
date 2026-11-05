@@ -1,0 +1,17 @@
+# Credentials — never package the FABRIC token
+id_token.json
+*.json.bak
+
+# Local env / generated output
+.venv/
+results/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+.ipynb_checkpoints/
+cc-usage-log.md
+
+# Source notes
+demo.txt
+ceph.txt
