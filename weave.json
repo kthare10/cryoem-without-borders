@@ -71,7 +71,7 @@
       "type": "number",
       "required": false,
       "default": 500,
-      "description": "Local scratch disk (outputs go to ~/cryoem-work). Max 1000 GB; the whole dataset (§7b) needs ~760 GB, so at 500 GB set FULL_MAX in the notebook."
+      "description": "Local scratch disk (outputs go to ~/cryoem-work). Max 1000 GB; the whole-dataset run (§7b) needs ~380 GB, because each aligned sum is deleted once its CTF fit is saved."
     },
     {
       "name": "RECEIVER_SITE",
@@ -103,7 +103,7 @@
       "type": "number",
       "required": false,
       "default": 500,
-      "description": "Receiver local disk; transferred results land in ~/cryoem-inbox. Max 1000 GB; the whole-dataset results need ~760 GB."
+      "description": "Receiver local disk; transferred results land in ~/cryoem-inbox. Max 1000 GB; the whole-dataset results need ~380 GB."
     },
     {
       "name": "XFER_SUBNET",

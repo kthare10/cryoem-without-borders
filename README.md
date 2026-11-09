@@ -62,9 +62,9 @@ Upload data through Globus (collection `651ebde0-d63e-4f8d-843b-a457a1326112`) a
 | `NUM_GPUS` | `2` | GPUs on the VM, all from one host |
 | `GPU_MODEL` | `auto` | Best model with `NUM_GPUS` free (A40 > A30 > RTX6000 > T4), or a pinned model |
 | `SITE` / `EXCLUDE_SITES` | blank | Pin or skip sites |
-| `CORES` / `RAM` / `DISK` | 16 / 64 / 500 | VM size. FABRIC's largest VM disk is 1000 GB; the whole-dataset run (§7b) needs ~760 GB, so at 500 GB cap it with `FULL_MAX`. §7b runs MotionCor3 in batches of `FULL_BATCH` movies, retries a failed batch once, stops with the reason if it fails again, and continues where it stopped when the cell is run again |
+| `CORES` / `RAM` / `DISK` | 16 / 64 / 500 | VM size. FABRIC's largest VM disk is 1000 GB. §7b runs detached on the node in batches of `FULL_BATCH` movies, fits CTF per batch, deletes each aligned sum once fitted and streams each batch to the receiver (deleting it locally once verified there), so all 5,658 movies fit on 500 GB; it retries a failed batch once, stops with the reason if it fails again, and continues where it stopped when the cell is run again |
 | `RECEIVER_SITE` | `FIU` | Downstream site that receives the results (blank = no receiver) |
-| `RECEIVER_CORES` / `RAM` / `DISK` | 8 / 32 / 500 | Receiver VM size; cores for the parallel transfer. Whole-dataset results need ~760 GB |
+| `RECEIVER_CORES` / `RAM` / `DISK` | 8 / 32 / 500 | Receiver VM size; cores for the parallel transfer. Whole-dataset results need ~380 GB |
 | `XFER_SUBNET` | `192.168.100.0/24` | Private subnet of the dedicated transfer link |
 | `XFER_NIC` | `NIC_Basic` | NIC on both ends of the transfer link: `NIC_Basic` (shared), `NIC_ConnectX_5` (2×25G), `NIC_ConnectX_6` (2×100G), `NIC_ConnectX_7_100`. ConnectX needs the matching project tag, e.g. `Component.SmartNIC_ConnectX_5` |
 | `PIN_CPU` | `true` | Pins both VMs' vCPUs to the transfer NIC's NUMA node (CPU pinning only, no restart); `false` skips it |
@@ -89,6 +89,7 @@ Upload data through Globus (collection `651ebde0-d63e-4f8d-843b-a457a1326112`) a
 * **Access:** the GPU node gets its own key (`~/.ssh/xfer_ed25519`), authorized on the receiver, plus an SSH alias `receiver`. The alias uses the receiver's XFER IP as `HostName` and the GPU node's XFER IP as `BindAddress`, so VM-to-VM SSH and rsync always run on the dataplane. The weave and notebook §9 both check `$SSH_CONNECTION` and fail if a session is on any other network. iperf3 is bound to the XFER address too.
 * **Notebook §9:** prints path, RTT, MTU and NIC (read from the live slice), runs an iperf3 baseline (first 5 s of TCP ramp-up left out) and a write test of the receiver's disk (`RXDISK_GB`, O_DIRECT), builds a SHA-256 manifest, then sends the files as `XFER_STREAMS` parallel rsync streams (default 16, timed on the node) and runs `sha256sum -c` on the receiver. Results go to `results/<run>/transfer.json`. `XFER_METHOD = "rsyncd"` (default) starts a temporary rsync daemon on the receiver, bound to its XFER address and open only to the GPU node's XFER address, and sends over plain TCP. `"ssh"` uses rsync over SSH (AES-GCM), which an untrusted path such as CAPE over the internet needs. OpenSSH's fixed ~2 MiB channel window caps each SSH stream at window / RTT: one stream reached 0.54 of 11.72 Gbit/s, and 8 streams MICH → FIU reached 2.25 of 7.92 Gbit/s.
 * **Switching to CAPE:** in the notebook, set `DEST_SSH` / `DEST_DIR` to the CAPE endpoint; the rest of §9 is unchanged. In the slice, either set `RECEIVER_SITE` to CAPE's FABRIC site (if it is one) or replace the receiver's interface on `XFER` with a CAPE facility port, which keeps the same dedicated L2 path.
+* **Streaming during the whole-dataset run (§7b):** a shipper job on the GPU node sends each finished batch (~6.5 GB) to `~/cryoem-inbox/full-streamed` on the receiver with rsync over SSH on the XFER link, verifies it there with `sha256sum -c`, and frees the GPU node's disk, while MotionCor3 processes the next batch (~7 min). Only the last batch is still in flight when processing ends. Failed sends are retried with back-off and never stop the processing.
 * **Existing slices:** re-running the weave on a slice that predates the receiver adds the receiver node and the XFER link in place. The slice is modified, not recreated.
 
 ## Usage
@@ -112,6 +113,7 @@ ACTION=extend ./weave.sh cryoem-demo      # renew lease
 | §7 | Per micrograph, zoom | **Full-resolution crops** before/after, plus **signal vs. resolution**: power vs. resolution on the same scale for both, the 10–5 Å signal gain, and the CTF fit line |
 | §7 | Batch dashboard | Drift per movie, high-resolution signal gain, CTF fit per micrograph, mean spectrum before/after, movies/min on the GPUs |
 | §7b | Demo vs. whole dataset | MotionCor3 time measured vs. predicted from the demo, seconds per movie, CTF fit histogram for every movie (`results/full/scaling.png`, `scaling.json`) |
+| §7b | Benchmark vs. workstation | Wall clock for motion correction + CTF on the whole dataset against the UCSC workstation (2× RTX 3090, 23 h 06 min), projected from seconds per movie while the run is going; time until every result is verified on the receiver; movies per hour per GPU (`results/full/benchmark.png`, `benchmark.json`) |
 | §9 | Transfer | iperf3 per-second throughput vs. the achieved rsync rate, capacity vs. achieved bars, checksum badge |
 | §9 | Timeline | Every stage from Ceph read to verified copy, colored by storage / GPU / CPU / network |
 
