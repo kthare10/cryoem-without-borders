@@ -22,7 +22,7 @@ There are two phases:
 | Phase | What | Where |
 |---|---|---|
 | A. Bring-up (automated) | Pick a GPU host, create the slice, mount the volume, install the tools, extend the lease, write `results/slice_info.json`, **exit** | `weave.sh` → `provision.py` |
-| B. Experiment | MotionCor3 (all GPUs) → CTFFIND4 → before/after figures → whole-dataset run with timing comparison → transfer to FIU (iperf3 baseline, parallel rsync, checksum verify) → optional RELION 5 pipeline | `cryoem_experiment.ipynb` |
+| B. Experiment | MotionCor3 (all GPUs) → CTFFIND4 → before/after figures → scale-up run (200 movies by default, or the whole dataset) with timing comparison → transfer to FIU (iperf3 baseline, parallel rsync, checksum verify) → optional RELION 5 pipeline | `cryoem_experiment.ipynb` |
 
 ## Files
 
@@ -112,7 +112,7 @@ ACTION=extend ./weave.sh cryoem-demo      # renew lease
 | §7 | Per micrograph, 2×3 | Unaligned vs. aligned (binned), both power spectra, CTFFIND fit, drift track |
 | §7 | Per micrograph, zoom | **Full-resolution crops** before/after, plus **signal vs. resolution**: power vs. resolution on the same scale for both, the 10–5 Å signal gain, and the CTF fit line |
 | §7 | Batch dashboard | Drift per movie, high-resolution signal gain, CTF fit per micrograph, mean spectrum before/after, movies/min on the GPUs |
-| §7b | Demo vs. whole dataset | MotionCor3 time measured vs. predicted from the demo, seconds per movie, CTF fit histogram for every movie (`results/full/scaling.png`, `scaling.json`) |
+| §7b | Demo vs. scale-up run | §7b processes the first `FULL_MAX` movies (default 200, about half an hour; `FULL_MAX = None` runs the whole dataset, about 15 hours). MotionCor3 time measured vs. predicted from the demo, seconds per movie, CTF fit histogram for every movie (`results/full/scaling.png`, `scaling.json`) |
 | §7b | Benchmark vs. workstation | Wall clock for motion correction + CTF on the whole dataset against the UCSC workstation (2× RTX 3090, 23 h 06 min), projected from seconds per movie while the run is going; time until every result is verified on the receiver; movies per hour per GPU (`results/full/benchmark.png`, `benchmark.json`) |
 | §9 | Transfer | iperf3 per-second throughput vs. the achieved rsync rate, capacity vs. achieved bars, checksum badge |
 | §9 | Timeline | Every stage from Ceph read to verified copy, colored by storage / GPU / CPU / network |
