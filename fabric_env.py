@@ -1,15 +1,10 @@
 """Shared FABRIC connection settings for the CryoEM Without Borders weave.
 
 Both ``provision.py`` (the weave) and ``cryoem_experiment.ipynb`` import this so
-they talk to FABRIC with the same token and project:
-
-- Token: the user's default FABRIC token (``FABRIC_TOKEN_LOCATION`` / ``fabric_rc``,
-  normally ``~/work/fabric_config/id_token.json``). Set ``CRYOEM_TOKEN`` to use another file.
-- Project: "CryoEM Without Borders" (override with ``CRYOEM_PROJECT_ID``).
-
-Everything else (bastion user/key, slice SSH keys) comes from the normal
-``fabric_rc`` (``~/work/fabric_config/fabric_rc``). The project is passed
-explicitly because values in ``fabric_rc`` win over environment variables.
+they talk to FABRIC the same way: with the user's default FABRIC config (``fabric_rc``,
+LoomAI's Configure view), its token and its project. Nothing is overridden here, so
+the weave works in whatever project the user has selected. (Passing a project_id would
+make fablib refresh the token into that project.)
 """
 
 from __future__ import annotations
@@ -17,9 +12,6 @@ from __future__ import annotations
 import os
 
 WEAVE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-PROJECT_NAME = "CryoEM Without Borders"
-PROJECT_ID = os.environ.get("CRYOEM_PROJECT_ID", "c93be0c1-696c-4c36-9dbd-03b14be196af")
 
 # CephFS project volume (the Globus collection is backed by this subvolume).
 CEPH_CLUSTER = os.environ.get("CEPH_CLUSTER", "west")
@@ -74,11 +66,22 @@ def resolve_slice_name(fablib) -> str:
 
 
 def get_fablib():
-    """FablibManager bound to the CryoEM project, using the default token unless
-    ``CRYOEM_TOKEN`` names another one."""
+    """FablibManager with the default FABRIC config: its token and its project."""
     from fabrictestbed_extensions.fablib.fablib import FablibManager
 
-    token = os.environ.get("CRYOEM_TOKEN")
-    if token:
-        return FablibManager(project_id=PROJECT_ID, token_location=os.path.expanduser(token))
-    return FablibManager(project_id=PROJECT_ID)
+    return FablibManager()
+
+
+def token_project(fablib) -> dict:
+    """{'name', 'uuid', 'tags'} of the project in the token FABRIC checks (best effort)."""
+    import base64
+    import json
+
+    try:
+        with open(os.path.expanduser(fablib.get_token_location())) as fh:
+            tok = json.load(fh)["id_token"].split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(tok + "=" * (-len(tok) % 4)))
+        projects = claims.get("projects") or []
+        return projects[0] if projects else {}
+    except Exception:
+        return {}

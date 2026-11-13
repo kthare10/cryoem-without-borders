@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CryoEM Without Borders</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f7fa; --card: #ffffff; --ink: #1c2833; --muted: #5d6d7e; --line: #d5dbe1;
+    --gpu: #2471a3; --gpu-soft: rgba(36,113,163,.14); --net: #1e8449; --net-soft: rgba(30,132,73,.14);
+    --ws: #95a5a6; --cape: #7d3c98; --warn: #ca6f1e; --bad: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11161c; --card: #1a222b; --ink: #e5e8eb; --muted: #95a5b4; --line: #2c3742;
+            --gpu: #5dade2; --gpu-soft: rgba(93,173,226,.15); --net: #2ecc71; --net-soft: rgba(46,204,113,.15);
+            --ws: #7f8c8d; --cape: #bb8fce; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 20px 28px 6px; display: flex; gap: 18px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 28px; }
+  header p { margin: 4px 0 0; color: var(--muted); max-width: 900px; }
+  .logos { display: flex; gap: 14px; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 8px 14px; }
+  .logos img { display: block; height: auto; max-height: 44px; max-width: 100%; }
+  .logos a:first-child img { max-height: 32px; }
+  main { padding: 12px 28px 32px; display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; min-width: 0; }
+  .card h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .s4 { grid-column: span 4; } .s6 { grid-column: span 6; } .s8 { grid-column: span 8; } .s12 { grid-column: span 12; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; padding: 12px 16px; } .s4,.s6,.s8,.s12 { grid-column: auto; }
+    header { padding: 16px 16px 4px; } }
+  .note { color: var(--muted); font-size: 13px; }
+  .err { color: var(--bad); font-size: 13px; min-height: 18px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+  button.primary { background: var(--gpu); border-color: var(--gpu); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  select { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  @media (max-width: 1000px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+  .kpi small { color: var(--muted); display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .kpi span { display: block; font-size: 30px; font-weight: 700; line-height: 1.15; }
+  .kpi small span { display: inline; font-size: inherit; font-weight: inherit; line-height: inherit; }
+  .kpi em { font-style: normal; color: var(--muted); font-size: 13px; }
+  .bar { height: 10px; background: var(--line); border-radius: 6px; overflow: hidden; margin-top: 6px; }
+  .bar > div { height: 100%; background: var(--gpu); width: 0; transition: width .6s; }
+  .bench { display: grid; grid-template-columns: 160px 1fr; gap: 10px 12px; align-items: center; margin-top: 6px; }
+  .bench .lbl { font-size: 13px; }
+  .bench .lbl b { display: block; font-size: 14px; }
+  .bench .track { background: transparent; position: relative; height: 34px; }
+  .bench .fill { height: 100%; border-radius: 6px; display: flex; align-items: center; justify-content: flex-end; padding: 0 10px;
+                 color: #fff; font-weight: 700; white-space: nowrap; min-width: 90px; transition: width .8s; }
+  .bench .fill:empty { min-width: 0; padding: 0; }
+  .bench .ws { background: var(--ws); }
+  .bench .fab { background: var(--gpu); }
+  .bench .fab.proj { background: repeating-linear-gradient(135deg, var(--gpu) 0 10px, color-mix(in srgb, var(--gpu) 75%, #fff) 10px 20px); }
+  .bench .dl { background: var(--net); }
+  .bench .dl.proj { background: repeating-linear-gradient(135deg, var(--net) 0 10px, color-mix(in srgb, var(--net) 75%, #fff) 10px 20px); }
+  #speedup { font-size: 34px; font-weight: 800; color: var(--gpu); margin: 4px 0 0; }
+  .imgs { display: grid; grid-template-columns: 3fr 2fr; gap: 10px; }
+  .imgs figure { margin: 0; }
+  .imgs img { width: 100%; display: block; border-radius: 8px; background: #000; aspect-ratio: 1; object-fit: cover; }
+  .imgs figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .gal { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+  .gal button { padding: 4px 10px; font-size: 13px; }
+  #galImg { width: 100%; border-radius: 8px; margin-top: 8px; background: #fff; }
+  svg text { fill: var(--ink); font-size: 13px; }
+  svg .sub { fill: var(--muted); font-size: 11.5px; }
+  .flow { stroke-dasharray: 10 8; }
+  .flowing { animation: dash .6s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -18; } }
+  .pulse { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .netmap svg { display: block; width: 100%; height: auto; border-radius: 8px; }
+  .route-glow { fill: none; stroke: #fff; stroke-width: 16; opacity: .55; stroke-linecap: round; }
+  .route { fill: none; stroke: #c39bd3; stroke-width: 7; stroke-linecap: round; stroke-dasharray: 18 12; }
+  .pin { fill: #c39bd3; stroke: #fff; stroke-width: 3; }
+  .netmap svg text { fill: #4a235a; font-weight: 700; paint-order: stroke; stroke: rgba(255,255,255,.95); stroke-width: 8px; }
+  .state { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--line); }
+  .state.RUNNING { background: var(--gpu); color: #fff; } .state.DONE { background: var(--net); color: #fff; }
+  .state.FAILED { background: var(--bad); color: #fff; }
+  #banner { grid-column: 1 / -1; display: none; border-color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>CryoEM Without Borders</h1>
+    <p>Microscope movies are aligned and CTF-fitted on FABRIC GPUs as they arrive, and every finished batch streams to
+       FIU, FABRIC's gateway to South America and Africa, where it is checksum-verified. The next hop is Cape Town over AmLight.</p>
+  </div>
+  <div class="logos">
+    <a href="https://fabric-testbed.net" target="_blank" rel="noopener"><img src="static/fabric-logo.png" alt="FABRIC" height="32"></a>
+    <a href="https://www.amlight.net" target="_blank" rel="noopener"><img src="static/amlight-logo.jpg" alt="AmLight" height="44"></a>
+  </div>
+</header>
+<main>
+  <section class="card" id="banner"><b>Not prepared yet.</b> <span id="bannerText"></span></section>
+
+  <section class="card s8">
+    <h2>The pipeline</h2>
+    <svg viewBox="0 40 900 180" width="100%" role="img" aria-label="Data path from storage to GPU node to FIU and Cape Town">
+      <!-- storage -->
+      <rect x="10" y="70" width="150" height="90" rx="12" fill="none" stroke="var(--muted)" stroke-width="2"/>
+      <text x="85" y="100" text-anchor="middle" font-weight="700">Microscope data</text>
+      <text x="85" y="118" text-anchor="middle" class="sub">FABRIC Ceph volume</text>
+      <text x="85" y="134" text-anchor="middle" class="sub">(Globus collection)</text>
+      <text x="85" y="150" text-anchor="middle" class="sub" id="nAll"></text>
+      <line id="inLine" class="flow" x1="160" y1="115" x2="250" y2="115" stroke="var(--muted)" stroke-width="4"/>
+      <!-- GPU node -->
+      <rect id="gpuBox" x="250" y="55" width="200" height="120" rx="12" fill="var(--gpu-soft)" stroke="var(--gpu)" stroke-width="2.5"/>
+      <text x="350" y="82" text-anchor="middle" font-weight="700" id="gpuSite">GPU node</text>
+      <text x="350" y="100" text-anchor="middle" class="sub" id="gpuLabel"></text>
+      <text x="350" y="120" text-anchor="middle" class="sub">MotionCor3 · CTFFIND4</text>
+      <text x="350" y="150" text-anchor="middle" font-weight="700" id="gpuNow" fill="var(--gpu)"></text>
+      <!-- XFER link -->
+      <line id="xferLine" class="flow" x1="450" y1="115" x2="610" y2="115" stroke="var(--net)" stroke-width="7"/>
+      <text x="530" y="100" text-anchor="middle" font-weight="700">FABRIC L2 link</text>
+      <text x="530" y="140" text-anchor="middle" class="sub">dedicated, private</text>
+      <text x="530" y="158" text-anchor="middle" font-weight="700" id="linkNow" fill="var(--net)"></text>
+      <!-- receiver -->
+      <rect x="610" y="55" width="150" height="120" rx="12" fill="var(--net-soft)" stroke="var(--net)" stroke-width="2.5"/>
+      <text x="685" y="82" text-anchor="middle" font-weight="700" id="rxSite">FIU</text>
+      <text x="685" y="100" text-anchor="middle" class="sub">AMPATH gateway</text>
+      <text x="685" y="120" text-anchor="middle" class="sub">verified copy</text>
+      <text x="685" y="150" text-anchor="middle" font-weight="700" id="rxNow" fill="var(--net)"></text>
+      <!-- Cape Town, next -->
+      <line x1="760" y1="115" x2="800" y2="115" stroke="var(--cape)" stroke-width="3" stroke-dasharray="4 5"/>
+      <rect x="800" y="75" width="92" height="80" rx="12" fill="none" stroke="var(--cape)" stroke-width="2" stroke-dasharray="6 5"/>
+      <text x="846" y="104" text-anchor="middle" font-weight="700" fill="var(--cape)">Cape Town</text>
+      <text x="846" y="122" text-anchor="middle" class="sub">via AmLight</text>
+      <text x="846" y="138" text-anchor="middle" class="sub">next</text>
+      <text x="450" y="210" text-anchor="middle" class="sub">Each batch streams to FIU while the GPUs work on the next one.</text>
+    </svg>
+  </section>
+
+  <section class="card s4">
+    <h2>Run</h2>
+    <div class="row"><span>State</span> <span class="state" id="state">–</span> <span class="note" id="runName"></span></div>
+    <div class="row">
+      <select id="nMovies" aria-label="Movies to process">
+        <option value="20">20 movies (~3 min)</option>
+        <option value="50" selected>50 movies (~7 min)</option>
+        <option value="100">100 movies (~15 min)</option>
+        <option value="200">200 movies (~30 min)</option>
+      </select>
+      <button class="primary" id="btnStart">Start run</button>
+      <button id="btnStop">Stop</button>
+    </div>
+    <div class="bar"><div id="progress"></div></div>
+    <div class="note" id="progressText" style="margin-top:6px"></div>
+    <div class="err" id="runErr"></div>
+    <div class="note" id="estimate"></div>
+  </section>
+
+  <section class="card s12">
+    <div class="kpis">
+      <div class="kpi"><small>Movies aligned</small><span id="kDone">–</span><em id="kDoneSub"></em></div>
+      <div class="kpi"><small>Throughput</small><span id="kRate">–</span><em>movies / min on the GPUs</em></div>
+      <div class="kpi"><small>GPUs busy</small><span id="kGpu">–</span><em id="kGpuSub"></em></div>
+      <div class="kpi"><small>CTF fit (median)</small><span id="kCtf">–</span><em id="kCtfSub"></em></div>
+      <div class="kpi"><small>Verified at <span class="rxName">FIU</span></small><span id="kRx">–</span><em id="kRxSub"></em></div>
+    </div>
+  </section>
+
+  <section class="card s6">
+    <h2>Whole dataset: FABRIC vs. a lab workstation</h2>
+    <div id="speedup">–</div>
+    <div class="note" id="speedupSub">Start a run: the FABRIC bar is projected from its pace.</div>
+    <div class="bench">
+      <div class="lbl"><b id="wsLabel">Workstation</b><span id="wsGpus" class="note"></span></div>
+      <div class="track"><div class="fill ws" id="bWs" style="width:100%">–</div></div>
+      <div class="lbl"><b>FABRIC</b><span id="fabGpus" class="note"></span></div>
+      <div class="track"><div class="fill fab proj" id="bFab" style="width:0">–</div></div>
+      <div class="lbl"><b>FABRIC, verified at <span class="rxName">FIU</span></b><span class="note">results delivered</span></div>
+      <div class="track"><div class="fill dl proj" id="bDl" style="width:0">–</div></div>
+    </div>
+    <div class="note" style="margin-top:8px">Motion correction + CTF estimation for every movie in the dataset. Striped = projected from the current run.</div>
+  </section>
+
+  <section class="card s6">
+    <h2>Live: GPUs and the link to <span class="rxName">FIU</span></h2>
+    <div style="height:250px"><canvas id="chart"></canvas></div>
+  </section>
+
+  <section class="card s6">
+    <h2>Newest micrograph, as it comes off the GPUs</h2>
+    <div class="imgs">
+      <figure><img id="latestMic" alt="newest aligned micrograph"><figcaption id="latestCap">Waiting for the first batch…</figcaption></figure>
+      <figure><img id="latestCtf" alt="CTFFIND4 power spectrum and fit"><figcaption>Power spectrum with the CTFFIND4 fit (Thon rings)</figcaption></figure>
+    </div>
+  </section>
+
+  <section class="card s6">
+    <h2>What alignment buys: before vs. after</h2>
+    <div class="gal" id="gal"></div>
+    <img id="galImg" alt="before and after motion correction">
+    <div class="note" id="galCap">The same frames summed without alignment (before) and after MotionCor3 (after).</div>
+  </section>
+
+  <section class="card s6">
+    <h2>FABRIC: from <span class="rxName">FIU</span> to Cape Town</h2>
+    <figure class="netmap" style="margin:0">
+      <svg viewBox="0 0 1955 941" role="img" aria-label="FABRIC network map with the FIU to Cape Town path highlighted">
+        <image href="static/fabric-map.jpg" width="1955" height="941"/>
+        <path class="route-glow" d="M 1222 694 Q 1185 750 1170 806 Q 1450 770 1710 895"/>
+        <path class="route" id="capeRoute" d="M 1222 694 Q 1185 750 1170 806 Q 1450 770 1710 895"/>
+        <circle class="pin" cx="1222" cy="694" r="13"/><circle class="pin pulse" cx="1710" cy="895" r="13"/>
+        <text x="1250" y="655" style="font-size:52px">results land here</text>
+      </svg>
+    </figure>
+  </section>
+
+  <section class="card s6">
+    <h2>AmLight: Miami to Cape Town</h2>
+    <figure class="netmap" style="margin:0">
+      <svg viewBox="0 0 1024 737" role="img" aria-label="AmLight network map with the route to Cape Town">
+        <image href="static/amlight-map.jpg" width="1024" height="737"/>
+        <path class="route-glow" d="M 316 180 L 318 162 Q 520 230 606 384 Q 790 372 937 477 Q 965 525 982 583"/>
+        <path class="route" d="M 316 180 L 318 162 Q 520 230 606 384 Q 790 372 937 477 Q 965 525 982 583"/>
+        <circle class="pin" cx="316" cy="180" r="9"/><circle class="pin pulse" cx="982" cy="583" r="9"/>
+      </svg>
+    </figure>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const hm = (s) => { if (s == null) return "–"; const m = Math.round(s / 60); return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`; };
+let INFO = null, last = null;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+const chart = new Chart($("chart"), {
+  type: "line",
+  data: { labels: [], datasets: [
+    { label: "link to receiver (Gb/s)", data: [], yAxisID: "y", borderColor: css("--net"), backgroundColor: css("--net-soft"), fill: true, tension: .25, pointRadius: 0, borderWidth: 3 },
+    { label: "GPU busy (%)", data: [], yAxisID: "y2", borderColor: css("--gpu"), fill: false, tension: .25, pointRadius: 0, borderWidth: 2 },
+  ]},
+  options: { animation: false, maintainAspectRatio: false,
+    scales: { x: { ticks: { color: css("--muted"), maxTicksLimit: 8 } },
+              y: { beginAtZero: true, title: { display: true, text: "Gb/s" }, ticks: { color: css("--muted") } },
+              y2: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: "GPU %" }, ticks: { color: css("--muted") } } },
+    plugins: { legend: { labels: { color: css("--ink") } } } },
+});
+
+async function loadInfo() {
+  INFO = await api("api/info");
+  const c = INFO.conf || {};
+  $("banner").style.display = INFO.configured && INFO.kit ? "none" : "block";
+  $("bannerText").textContent = INFO.hint || "";
+  $("btnStart").disabled = !(INFO.configured && INFO.kit);
+  $("gpuSite").textContent = c.gpu_site ? `GPU node · ${c.gpu_site}` : "GPU node";
+  $("gpuLabel").textContent = c.gpu_label || INFO.gpus.map(g => g.name).join(" + ");
+  $("fabGpus").textContent = c.gpu_label ? `${c.gpu_label} (${c.gpu_site})` : "";
+  const rx = c.receiver_site || "FIU";
+  $("rxSite").textContent = rx;
+  document.querySelectorAll(".rxName").forEach(e => e.textContent = rx);
+  $("nAll").textContent = c.n_all ? `${c.n_all.toLocaleString()} movies` : "";
+  const ws = c.workstation || {};
+  $("wsLabel").textContent = ws.label || "Workstation";
+  $("wsGpus").textContent = ws.gpus || "";
+  $("bWs").textContent = ws.hours ? hm(ws.hours * 3600) : "–";
+}
+
+async function loadGallery() {
+  const g = await api("api/gallery").catch(() => []);
+  const box = $("gal"); box.replaceChildren();
+  if (!g.length) { $("galCap").textContent = "Run the notebook's demo batch (§5-§7) to get before/after figures."; return; }
+  const show = (i, kind) => { $("galImg").src = `api/gallery/${i}/${kind}.png`;
+    const s = g[i]; $("galCap").textContent = `${s.micrograph}: drift ${s.drift_px ? s.drift_px.toFixed(1) + " px" : "–"}, ` +
+      `CTF fit ${s.fit_A ? s.fit_A.toFixed(2) + " Å" : "–"}` + (s.hf_gain ? `, ${s.hf_gain.toFixed(2)}× signal at 10–5 Å after alignment` : ""); };
+  g.forEach((s, i) => { const b = document.createElement("button"); b.textContent = `Micrograph ${i + 1}`;
+    b.onclick = () => show(i, s.zoom ? "zoom" : "fig"); box.append(b); });
+  show(0, g[0].zoom ? "zoom" : "fig");
+}
+
+function setFlow(id, on) { $(id).classList.toggle("flowing", on); }
+
+async function poll() {
+  let p;
+  try { p = await api("api/poll"); } catch (e) { $("runErr").textContent = "lost contact with the GPU node - is the tunnel up?"; return; }
+  $("runErr").textContent = "";
+  const r = p.run, c = (INFO && INFO.conf) || {};
+  // GPUs
+  const util = p.gpus.length ? Math.round(p.gpus.reduce((a, g) => a + g.util, 0) / p.gpus.length) : 0;
+  $("kGpu").textContent = p.gpus.length ? `${util}%` : "–";
+  $("kGpuSub").textContent = p.gpus.map(g => `GPU${g.index} ${g.util}%`).join(" · ");
+  $("gpuNow").textContent = util > 5 ? `${util}% busy` : "";
+  $("gpuBox").classList.toggle("pulse", util > 5);
+  // link
+  const gbps = p.link.gbps || 0;
+  $("linkNow").textContent = gbps > 0.01 ? `${gbps.toFixed(2)} Gb/s` : "";
+  setFlow("xferLine", gbps > 0.01);
+  setFlow("inLine", util > 5);
+  const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  chart.data.labels.push(now); chart.data.datasets[0].data.push(gbps); chart.data.datasets[1].data.push(util);
+  if (chart.data.labels.length > 150) { chart.data.labels.shift(); chart.data.datasets.forEach(d => d.data.shift()); }
+  chart.update();
+  // run
+  $("state").textContent = r ? r.state : "no run yet"; $("state").className = "state " + (r ? r.state : "");
+  $("runName").textContent = r ? r.run : "";
+  $("btnStop").disabled = !(r && r.state === "RUNNING");
+  if (p.busy && (!r || p.busy !== r.run)) $("runErr").textContent = `The notebook's run '${p.busy}' is using the GPUs.`;
+  if (!r) return;
+  const pct = r.n_total ? 100 * r.n_done / r.n_total : 0;
+  $("progress").style.width = pct + "%";
+  $("progressText").textContent = `${r.n_done} / ${r.n_total} movies aligned · ${r.n_ctf} CTF fits · ` +
+    `${r.ship_done} / ${Math.max(r.ship_queued, r.ship_done)} batches verified at ${c.receiver_site || "FIU"}`;
+  if (r.failed) $("runErr").textContent = r.failed;
+  $("kDone").textContent = r.n_done.toLocaleString(); $("kDoneSub").textContent = `of ${r.n_total} in this run · ${hm(r.wall_s)}`;
+  $("kRate").textContent = r.movies_per_min ? r.movies_per_min.toFixed(1) : "–";
+  $("kCtf").textContent = r.ctf_median_A ? `${r.ctf_median_A.toFixed(2)} Å` : "–";
+  $("kCtfSub").textContent = r.n_ctf ? `${r.ctf_le5} of ${r.n_ctf} fit to 5 Å or better` : "";
+  $("kRx").textContent = r.ship_bytes ? `${(r.ship_bytes / 1e9).toFixed(1)} GB` : "–";
+  $("kRxSub").textContent = r.ship_gbps ? `${r.ship_done} batches, ${r.ship_gbps.toFixed(2)} Gb/s per batch, SHA-256 checked` : "";
+  $("rxNow").textContent = r.ship_done ? `${r.ship_done} batch${r.ship_done > 1 ? "es" : ""} ✔` : "";
+  $("estimate").textContent = r.state === "RUNNING" && r.n_timed && r.n_done < r.n_total && r.movies_per_min
+    ? `About ${Math.ceil((r.n_total - r.n_done) / r.movies_per_min)} min of processing left.` : "";
+  // benchmark
+  if (r.projected_s && r.ws_s) {
+    const max = Math.max(r.ws_s, r.projected_s, r.delivered_s || 0);
+    const done = r.state === "DONE" && r.n_done >= (r.n_all || r.n_total);
+    $("bWs").style.width = (100 * r.ws_s / max) + "%";
+    $("bFab").style.width = (100 * r.projected_s / max) + "%"; $("bFab").textContent = hm(r.projected_s);
+    $("bFab").classList.toggle("proj", !done);
+    const dl = r.projected_s + (r.ship_done ? (r.t_ship_end && r.t_done ? Math.max(0, r.t_ship_end - r.t_done) : 60) : 0);
+    $("bDl").style.width = r.ship_done ? (100 * dl / max) + "%" : "0"; $("bDl").textContent = r.ship_done ? hm(dl) : "";
+    $("bDl").classList.toggle("proj", !done);
+    $("speedup").textContent = r.speedup ? `${r.speedup.toFixed(1)}× ${r.speedup >= 1 ? "faster" : "slower"}` : "–";
+    $("speedupSub").textContent = `${(r.n_all || 0).toLocaleString()} movies: ${hm(r.ws_s)} on the workstation vs. ` +
+      `${hm(r.projected_s)} on FABRIC${done ? "" : `, projected from ${r.n_done} movies so far`}.`;
+  }
+  // newest micrograph
+  if (p.latest && p.latest_t !== last) {
+    last = p.latest_t;
+    $("latestMic").src = `api/latest/mic.png?t=${last}`; $("latestCtf").src = `api/latest/ctf.png?t=${last}`;
+    const l = p.latest;
+    $("latestCap").textContent = `${l.micrograph} · defocus ${l.defocus_um} µm · CTF fit ${l.fit_A} Å`;
+  }
+}
+
+$("btnStart").onclick = async () => {
+  const n = $("nMovies").value;
+  if (!confirm(`Start a run of ${n} movies on the GPUs? Results stream to ${(INFO.conf || {}).receiver_site || "FIU"}.`)) return;
+  $("btnStart").disabled = true; $("runErr").textContent = "";
+  try { const r = await api("api/run/start", { method: "POST", body: JSON.stringify({ movies: Number(n) }) });
+        chart.data.labels = []; chart.data.datasets.forEach(d => d.data = []); $("runName").textContent = r.run; }
+  catch (e) { $("runErr").textContent = e.message; }
+  $("btnStart").disabled = false; poll();
+};
+$("btnStop").onclick = async () => {
+  if (!confirm("Stop the current run? Batches not yet sent stay on the GPU node.")) return;
+  try { await api("api/run/stop", { method: "POST" }); } catch (e) { $("runErr").textContent = e.message; }
+  poll();
+};
+
+(async () => {
+  try { await loadInfo(); } catch (e) { $("runErr").textContent = e.message; }
+  loadGallery(); poll(); setInterval(poll, 2000);
+})();
+</script>
+</body>
+</html>

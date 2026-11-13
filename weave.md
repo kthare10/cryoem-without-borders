@@ -34,6 +34,8 @@ tools/setup-node.sh   NVIDIA driver, CUDA 12.x, MotionCor3, CTFFIND 4.1.14, RELI
 tools/cryoem_preview.py  on-node before/after figures + summary.json
 tools/setup-receiver.sh  receiver: rsync, iperf3, ~/cryoem-inbox
 tools/net-tune.sh     TCP buffers / BBR / fq + MTU on the XFER interface (both ends)
+tools/setup-app.sh    demo web app on the GPU node (systemd, 127.0.0.1:8080)
+tools/demo_app/       the demo web app (Flask + waitress, page, logos and maps)
 cryoem_experiment.ipynb  the demo
 demo_viz.py           local demo charts: slice map, batch dashboard, transfer charts, stage timeline
 figures/              FABRIC and AmLight network maps shown in notebook §2
@@ -41,9 +43,9 @@ figures/              FABRIC and AmLight network maps shown in notebook §2
 
 ## Credentials and project
 
-`fabric_env.py` uses your **default FABRIC token** (the one `fabric_rc` / `FABRIC_TOKEN_LOCATION` points to, normally `~/work/fabric_config/id_token.json`) and passes the **CryoEM Without Borders** project (`c93be0c1-696c-4c36-9dbd-03b14be196af`) to `FablibManager`, so nothing has to be copied into this folder. The bastion user, bastion key and slice keys also come from `~/work/fabric_config/fabric_rc`. To use a different token file, set `CRYOEM_TOKEN=/path/to/token.json`.
+`fabric_env.py` uses your **default FABRIC config** as it is: the token and project in `fabric_rc` (LoomAI's Configure view), plus its bastion user, bastion key and slice keys. It does not pin a project, so the weave runs in whichever project you have selected, and nothing has to be copied into this folder. That project needs the tags the preflight check lists (GPUs, VM size, `Slice.Multisite` for the FIU receiver), and your account needs access to the `cryoem-without-borders` storage volume.
 
-The preflight check reads the project's permission tags from that same token. FABRIC tokens are short-lived; fablib refreshes the token automatically while its refresh token is valid. If calls fail with auth errors, or after a new tag is added to the project, download a fresh token from the Credential Manager.
+The weave prints the project it runs in, and the preflight check reads that project's permission tags from the token. FABRIC tokens are short-lived; fablib refreshes the token automatically while its refresh token is valid. If calls fail with auth errors, or after a new tag is added to the project, download a fresh token from the Credential Manager.
 
 ## Storage volume
 
@@ -101,6 +103,27 @@ ACTION=extend ./weave.sh cryoem-demo      # renew lease
 # The notebook finds the slice itself: $SLICE_NAME, else results/slice_info.json,
 # else the only slice in the project with a 'cryoem' node.
 ```
+
+## Demo app
+
+A live web view of the pipeline for the booth screen. The weave installs it on the GPU node (`tools/setup-app.sh`,
+systemd service `cryoem-demo-app`, `127.0.0.1:8080` only). Open it with **LoomAI: Tunnels > the slice, node
+`cryoem`, port 8080**, or the SSH tunnel the notebook prints.
+
+1. Run the notebook once through §7 (the demo batch gives the before/after figures) and start §7b (its scripts
+   become the app's run kit). §7b can be a small run.
+2. Run **§7c**. It copies §7b's `run.sh`, `ship.sh` and `ctf_one.sh` to `~/cryoem-work/app/kit/`, writes
+   `~/cryoem-work/app/app.json` (sites, GPUs, dataset size, workstation numbers) and checks the app answers.
+   `INSTALL_APP = True` reinstalls the app after changing `tools/demo_app/`.
+3. In the app, pick 20-200 movies and **Start run**. Each run gets its own `~/cryoem-work/live-<time>/` with the
+   kit's scripts and streams its batches to `~/cryoem-inbox/live-<time>/` on the receiver, so it behaves exactly
+   like §7b. Only one run uses the GPUs at a time; the app won't start one while §7b's run is processing.
+
+The page shows the pipeline (storage, GPU node, L2 link, FIU, Cape Town next), movies aligned and movies/min, GPU
+load, CTF fits, Gb/s on the link and batches verified at FIU, the newest aligned micrograph and its CTFFIND4 fit as
+each batch finishes, the before/after figures, the whole-dataset benchmark against the workstation (projected from
+the run's pace), and the FABRIC and AmLight maps onward to Cape Town. Runs started from the app keep going if the
+app restarts.
 
 ## Demo visuals
 

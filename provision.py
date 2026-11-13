@@ -30,7 +30,7 @@ import os
 import sys
 import time
 
-from fabric_env import (CEPH_CLUSTER, PROJECT_NAME, STORAGE_VOLUME, VOLUME_GLOB, data_dir,
+from fabric_env import (CEPH_CLUSTER, STORAGE_VOLUME, VOLUME_GLOB, data_dir, token_project,
                         WEAVE_DIR, get_fablib)
 
 import ipaddress
@@ -166,20 +166,16 @@ def find_receiver_host(res, cfg: dict):
 
 
 def project_tags(fablib) -> set:
-    """Project permission tags, read from the ``projects`` claim of the token fablib uses."""
-    import base64
+    """Permission tags of the project in the token fablib uses (the user's default)."""
+    tags = set(token_project(fablib).get("tags") or [])
+    if not tags:
+        print("### PROGRESS: WARNING — could not read project tags from the token; skipping the tag check")
+    return tags
 
-    from fabric_env import PROJECT_ID
 
-    try:
-        tok = json.load(open(fablib.get_token_location()))["id_token"].split(".")[1]
-        claims = json.loads(base64.urlsafe_b64decode(tok + "=" * (-len(tok) % 4)))
-        for p in claims.get("projects", []):
-            if p.get("uuid") == PROJECT_ID:
-                return set(p.get("tags", []))
-    except Exception as exc:
-        print(f"### PROGRESS: WARNING — could not read project tags from token ({exc})")
-    return set()
+def project_name(fablib) -> str:
+    p = token_project(fablib)
+    return f"{p.get('name', '?')} ({p.get('uuid') or fablib.get_project_id()})"
 
 
 def preflight(cfg: dict, fablib) -> None:
@@ -210,7 +206,7 @@ def preflight(cfg: dict, fablib) -> None:
         if "Component.SmartNIC" not in tags and not any(t.startswith(model_tag) for t in tags):
             need.append(f"{model_tag} (XFER_NIC={cfg['xfer_nic']})")
     if need:
-        print(f"### PROGRESS: ERROR — project '{PROJECT_NAME}' has tags {sorted(tags)}; "
+        print(f"### PROGRESS: ERROR — project {project_name(fablib)} has tags {sorted(tags)}; "
               f"this slice also needs: {', '.join(need)}.")
         print("### PROGRESS: Ask FABRIC support / the project lead to add them, then download a "
               "fresh id_token.json (tags are baked into the token).")
@@ -365,7 +361,7 @@ def configure_transfer(node, rx) -> dict:
 def start(slice_name: str) -> None:
     cfg = load_config()
     fablib = get_fablib()
-    print(f"### PROGRESS: Project: {PROJECT_NAME}")
+    print(f"### PROGRESS: FABRIC project: {project_name(fablib)} (your default FABRIC config)")
 
     try:
         existing = fablib.get_slice(name=slice_name)
@@ -479,9 +475,19 @@ def start(slice_name: str) -> None:
 
     extend_lease(slice_obj, cfg["lease_days"])
 
+    # Demo web app (optional: the notebook works without it).
+    app_ok = False
+    try:
+        out, _ = node.execute("bash ~/tools/setup-app.sh 8080 2>&1 | tail -3", quiet=True)
+        app_ok = "demo app up" in out
+        if not app_ok:
+            print(f"### PROGRESS: WARNING — demo app not installed: {out.strip()[-300:]}")
+    except Exception as exc:
+        print(f"### PROGRESS: WARNING — demo app not installed: {exc}")
+
     info = {
         "slice_name": slice_name,
-        "project": PROJECT_NAME,
+        "project": project_name(fablib),
         "node": NODE_NAME,
         "site": node.get_site(),
         "host": node.get_host(),
@@ -510,6 +516,9 @@ def start(slice_name: str) -> None:
         print(f"### PROGRESS: Receiver: {RECEIVER_NAME} @ {receiver['site']} — {XFER_NET} "
               f"{receiver['source_xfer_ip']} -> {receiver['xfer_ip']} (MTU {receiver['mtu']}, "
               f"{cfg['xfer_nic']}{', CPU pinned' if cfg['pin_cpu'] else ''}), inbox {receiver['inbox']}")
+    if app_ok:
+        print(f"### PROGRESS: Demo app: LoomAI Tunnels > slice {slice_name}, node {NODE_NAME}, port 8080 "
+              "(prepare it once with notebook §7c).")
     print(f"### PROGRESS: READY — open cryoem_experiment.ipynb (slice '{slice_name}').")
 
 
