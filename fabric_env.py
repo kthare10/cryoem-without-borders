@@ -82,6 +82,14 @@ def token_project(fablib) -> dict:
             tok = json.load(fh)["id_token"].split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(tok + "=" * (-len(tok) % 4)))
         projects = claims.get("projects") or []
-        return projects[0] if projects else {}
     except Exception:
         return {}
+    # The project fablib is bound to (fabric_rc's FABRIC_PROJECT_ID); a token can list several.
+    try:
+        want = fablib.get_project_id()
+    except Exception:
+        want = None
+    match = [p for p in projects if want and p.get("uuid") == want]
+    if match:
+        return match[0]
+    return projects[0] if len(projects) == 1 and not want else {}

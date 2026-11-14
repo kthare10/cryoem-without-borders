@@ -180,12 +180,19 @@ def run_status(d: str, c: dict) -> dict:
 def gpus() -> list:
     out = sh("nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu "
              "--format=csv,noheader,nounits")
+    def num(s: str) -> int:
+        # Newer drivers print some fields as decimals ("22.81"), others as "[N/A]".
+        try:
+            return int(round(float(s)))
+        except ValueError:
+            return 0
+
     rows = []
     for l in out.strip().splitlines():
         p = [x.strip() for x in l.split(",")]
         if len(p) >= 6:
-            rows.append({"index": p[0], "name": p[1].replace("NVIDIA ", ""), "util": int(p[2] or 0),
-                         "mem_used": int(p[3] or 0), "mem_total": int(p[4] or 0), "temp": int(p[5] or 0)})
+            rows.append({"index": p[0], "name": p[1].replace("NVIDIA ", ""), "util": num(p[2]),
+                         "mem_used": num(p[3]), "mem_total": num(p[4]), "temp": num(p[5])})
     return rows
 
 

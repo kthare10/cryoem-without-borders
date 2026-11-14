@@ -147,22 +147,26 @@ def find_gpu_host(res, cfg: dict):
 
 
 def find_receiver_host(res, cfg: dict):
-    """Host at RECEIVER_SITE with the receiver VM size and the XFER NIC free, or None."""
+    """Host at RECEIVER_SITE with the receiver VM size and the XFER NIC free, or None.
+    Of the hosts that fit, the one with the most free disk: a host only just above the
+    request can still refuse the sliver (FIU: 513 GB listed free, 500 GB refused)."""
     host_site = host_sites(res)
     try:
         rows = res.list_hosts(output="list", quiet=True) or []
     except Exception as exc:
         print(f"### PROGRESS: WARNING — list_hosts failed ({exc})")
         return None
-    for row in rows:
-        if (host_site.get(row.get("name")) == cfg["receiver_site"]
-                and str(row.get("state", "")).lower() == "active"
-                and int(row.get("cores_available", 0) or 0) >= cfg["receiver_cores"]
-                and int(row.get("ram_available", 0) or 0) >= cfg["receiver_ram"]
-                and int(row.get("disk_available", 0) or 0) >= cfg["receiver_disk"]
-                and int(row.get(NIC_FIELDS[cfg["xfer_nic"]], 0) or 0) >= 1):
-            return row.get("name")
-    return None
+    num = lambda row, k: int(row.get(k, 0) or 0)
+    fits = [row for row in rows
+            if host_site.get(row.get("name")) == cfg["receiver_site"]
+            and str(row.get("state", "")).lower() == "active"
+            and num(row, "cores_available") >= cfg["receiver_cores"]
+            and num(row, "ram_available") >= cfg["receiver_ram"]
+            and num(row, "disk_available") >= cfg["receiver_disk"]
+            and num(row, NIC_FIELDS[cfg["xfer_nic"]]) >= 1]
+    if not fits:
+        return None
+    return max(fits, key=lambda row: (num(row, "disk_available"), num(row, "cores_available"))).get("name")
 
 
 def project_tags(fablib) -> set:
@@ -247,6 +251,28 @@ def reboot_and_remount(slice_obj, node) -> None:
     time.sleep(60)
     slice_obj.wait_ssh(timeout=900, interval=15, progress=True)
     remount_ceph(node)
+
+
+def ensure_volume(fablib, node) -> str:
+    """Mount point of the storage volume on ``node``. If it isn't mounted (e.g. fablib's
+    post-boot Ceph step failed after the slice reached StableOK), redo that step: fetch
+    the Ceph bundle for CEPH_CLUSTER, upload it to ~/.ceph and run its mount script."""
+    try:
+        return data_dir(node)
+    except RuntimeError:
+        pass
+    print(f"### PROGRESS: Storage volume not mounted; setting up the {CEPH_CLUSTER} CephFS mount...")
+    remount_ceph(node)                                   # a bundle may already be on the node
+    try:
+        return data_dir(node)
+    except RuntimeError:
+        pass
+    bundle = fablib.generate_ceph_bundle(cluster=CEPH_CLUSTER)
+    cluster_dir = os.path.expanduser(bundle["cluster_dir"])
+    node.upload_directory(cluster_dir, ".ceph")
+    node.execute(f"sudo bash ~/.ceph/{os.path.basename(cluster_dir)}/"
+                 f"{os.path.basename(bundle['mount_script'])}", quiet=True)
+    return data_dir(node)                                # raises with the expected path if still missing
 
 
 def remount_ceph(node) -> None:
@@ -428,6 +454,15 @@ def start(slice_name: str) -> None:
         slice_obj = fablib.get_slice(name=slice_name)
 
     node = slice_obj.get_node(name=NODE_NAME)
+
+    # The input volume first (minutes), before the long software build: a volume problem
+    # should stop the run now, not after 45 minutes of compiling.
+    try:
+        ensure_volume(fablib, node)
+    except Exception as exc:
+        print(f"### PROGRESS: ERROR — storage volume '{STORAGE_VOLUME}': {exc}. Check that your account can "
+              "access it, then re-run the weave to retry on the existing slice.")
+        sys.exit(1)
 
     # Existing slice from before the receiver was added: modify it in place.
     names = {n.get_name() for n in slice_obj.get_nodes()}

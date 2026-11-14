@@ -17,7 +17,14 @@ INSTALL_RELION="${2:-true}"
 CUDA_PKG="cuda-toolkit-${CUDA_VERSION/./-}"
 CUDA_HOME="/usr/local/cuda-${CUDA_VERSION}"
 SRC="$HOME/src"
-CTFFIND_URL="https://grigoriefflab.umassmed.edu/system/tdf?path=ctffind-4.1.14-linux64.tar.gz&file=1&type=node&id=26"
+# The lab's pre-built, statically linked 4.1.14 binary. The lab publishes no checksum, so this
+# pins the SHA-256 of the tarball as downloaded in Nov 2026 (bin/ctffind, built May 2020).
+CTFFIND_URL="https://grigoriefflab.umassmed.edu/sites/default/files/ctffind-4.1.14-linux64.tar.gz"
+CTFFIND_SHA256="380209a5283f343cccd6385b8ae425ae79a5f05e1c69eea5f28cae7871bff998"
+# Source fallback: Debian's copy of the original tarball, over HTTPS, pinned to the SHA-256 in
+# Debian's signed ctffind_4.1.14-3.dsc. A tarball that doesn't match is never unpacked or built.
+CTFFIND_SRC_URL="https://deb.debian.org/debian/pool/main/c/ctffind/ctffind_4.1.14.orig.tar.gz"
+CTFFIND_SRC_SHA256="5f3eee53267fd1897cc1748d2154f7352452e881bcffd07d049d39a3c3b373b5"
 
 export DEBIAN_FRONTEND=noninteractive
 log() { echo "### SETUP: $*"; }
@@ -86,9 +93,27 @@ log "MotionCor3 OK: $(command -v MotionCor3)"
 # --- 4. CTFFIND 4.1.14 (CTF estimation) --------------------------------------
 if ! command -v ctffind >/dev/null 2>&1; then
     log "installing CTFFIND 4.1.14"
-    wget -q "$CTFFIND_URL" -O /tmp/ctffind.tar.gz
-    mkdir -p "$SRC/ctffind" && tar -xzf /tmp/ctffind.tar.gz -C "$SRC/ctffind"
-    sudo install -m 0755 "$(find "$SRC/ctffind" -type f -name ctffind | head -1)" /usr/local/bin/ctffind
+    # The lab's pre-built static binary first (no build). Its download link has moved before,
+    # so if it is unreachable or no longer matches the pinned hash, build the same version from
+    # source using Debian's copy of the original tarball (Debian builds it unpatched; Ubuntu
+    # 22.04 has no ctffind package).
+    if wget -q --https-only "$CTFFIND_URL" -O /tmp/ctffind.tar.gz \
+       && echo "$CTFFIND_SHA256  /tmp/ctffind.tar.gz" | sha256sum -c --quiet - 2>/dev/null; then
+        rm -rf "$SRC/ctffind" && mkdir -p "$SRC/ctffind" && tar -xzf /tmp/ctffind.tar.gz -C "$SRC/ctffind"
+        sudo install -m 0755 "$SRC/ctffind/bin/ctffind" /usr/local/bin/ctffind
+    else
+        log "CTFFIND binary unavailable or not matching its pinned hash; building 4.1.14 from source (a few minutes)"
+        apt_install libwxgtk3.0-gtk3-dev libfftw3-dev libtiff-dev libjpeg-dev
+        rm -rf "$SRC/ctffind-src" && mkdir -p "$SRC/ctffind-src"
+        wget -q --https-only "$CTFFIND_SRC_URL" -O "$SRC/ctffind-src/ctffind.orig.tar.gz"
+        echo "$CTFFIND_SRC_SHA256  $SRC/ctffind-src/ctffind.orig.tar.gz" | sha256sum -c --quiet - \
+          || { log "ERROR: CTFFIND source tarball does not match the pinned SHA-256; not building it"; exit 1; }
+        tar -xzf "$SRC/ctffind-src/ctffind.orig.tar.gz" -C "$SRC/ctffind-src"
+        ( cd "$SRC/ctffind-src"/ctffind-4.1.14 && ./configure --disable-debugmode > ../configure.log 2>&1 \
+          && make -j"$(nproc)" > ../make.log 2>&1 ) \
+          || { log "ERROR: CTFFIND build failed (see $SRC/ctffind-src/configure.log, make.log)"; exit 1; }
+        sudo install -m 0755 "$SRC/ctffind-src/ctffind-4.1.14/src/ctffind" /usr/local/bin/ctffind
+    fi
 fi
 log "CTFFIND OK: $(command -v ctffind)"
 
