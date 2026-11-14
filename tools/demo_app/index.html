@@ -61,6 +61,10 @@
   .imgs { display: grid; grid-template-columns: 3fr 2fr; gap: 10px; }
   .imgs figure { margin: 0; }
   .imgs img { width: 100%; display: block; border-radius: 8px; background: #000; aspect-ratio: 1; object-fit: cover; }
+  .imgs img[hidden], .imgs .ph[hidden] { display: none; }
+  .imgs .ph { width: 100%; aspect-ratio: 1; border-radius: 8px; background: #11161c; color: #95a5b4;
+              display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px;
+              font-size: 14px; }
   .imgs figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
   .gal { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
   .gal button { padding: 4px 10px; font-size: 13px; }
@@ -187,8 +191,10 @@
   <section class="card s6">
     <h2>Newest micrograph, as it comes off the GPUs</h2>
     <div class="imgs">
-      <figure><img id="latestMic" alt="newest aligned micrograph"><figcaption id="latestCap">Waiting for the first batch…</figcaption></figure>
-      <figure><img id="latestCtf" alt="CTFFIND4 power spectrum and fit"><figcaption>Power spectrum with the CTFFIND4 fit (Thon rings)</figcaption></figure>
+      <figure><div class="ph" id="latestMicPh">Waiting for the first movie to come off the GPUs…</div>
+        <img id="latestMic" alt="newest aligned micrograph" hidden><figcaption id="latestCap">Start a run to see each aligned micrograph as it is produced.</figcaption></figure>
+      <figure><div class="ph" id="latestCtfPh">The CTF fit appears when the first batch has been aligned (CTFFIND4 runs per batch).</div>
+        <img id="latestCtf" alt="CTFFIND4 power spectrum and fit" hidden><figcaption id="latestCtfCap">Power spectrum with the CTFFIND4 fit (Thon rings)</figcaption></figure>
     </div>
   </section>
 
@@ -310,12 +316,13 @@ async function poll() {
   $("btnStop").disabled = !(r && r.state === "RUNNING");
   if (p.busy && (!r || p.busy !== r.run)) $("runErr").textContent = `The notebook's run '${p.busy}' is using the GPUs.`;
   if (!r) return;
-  const pct = r.n_total ? 100 * r.n_done / r.n_total : 0;
+  const aligned = r.n_aligned ?? r.n_done;
+  const pct = r.n_total ? 100 * aligned / r.n_total : 0;
   $("progress").style.width = pct + "%";
-  $("progressText").textContent = `${r.n_done} / ${r.n_total} movies aligned · ${r.n_ctf} CTF fits · ` +
+  $("progressText").textContent = `${aligned} / ${r.n_total} movies aligned · ${r.n_ctf} CTF fits · ` +
     `${r.ship_done} / ${Math.max(r.ship_queued, r.ship_done)} batches verified at ${c.receiver_site || "FIU"}`;
   if (r.failed) $("runErr").textContent = r.failed;
-  $("kDone").textContent = r.n_done.toLocaleString(); $("kDoneSub").textContent = `of ${r.n_total} in this run · ${hm(r.wall_s)}`;
+  $("kDone").textContent = aligned.toLocaleString(); $("kDoneSub").textContent = `of ${r.n_total} in this run · ${hm(r.wall_s)}`;
   $("kRate").textContent = r.movies_per_min ? r.movies_per_min.toFixed(1) : "–";
   $("kCtf").textContent = r.ctf_median_A ? `${r.ctf_median_A.toFixed(2)} Å` : "–";
   $("kCtfSub").textContent = r.n_ctf ? `${r.ctf_le5} of ${r.n_ctf} fit to 5 Å or better` : "";
@@ -338,12 +345,37 @@ async function poll() {
     $("speedupSub").textContent = `${(r.n_all || 0).toLocaleString()} movies: ${hm(r.ws_s)} on the workstation vs. ` +
       `${hm(r.projected_s)} on FABRIC${done ? "" : `, projected from ${r.n_done} movies so far`}.`;
   }
-  // newest micrograph
-  if (p.latest && p.latest_t !== last) {
-    last = p.latest_t;
-    $("latestMic").src = `api/latest/mic.png?t=${last}`; $("latestCtf").src = `api/latest/ctf.png?t=${last}`;
-    const l = p.latest;
-    $("latestCap").textContent = `${l.micrograph} · defocus ${l.defocus_um} µm · CTF fit ${l.fit_A} Å`;
+  // newest micrograph (per movie) and newest CTF fit (per batch)
+  showLatest(p.latest || {});
+}
+
+let lastMic = null, lastCtf = null, lastRun = null;
+function resetLatest() {
+  lastMic = lastCtf = null;
+  ["latestMic", "latestCtf"].forEach(id => { $(id).hidden = true; $(id).removeAttribute("src"); $(id + "Ph").hidden = false; });
+  $("latestCap").textContent = "Start a run to see each aligned micrograph as it is produced.";
+  $("latestCtfCap").textContent = "Power spectrum with the CTFFIND4 fit (Thon rings)";
+}
+function showImg(id, url) {
+  const img = $(id), ph = $(id + "Ph");
+  const tmp = new Image();                     // swap only once the new image has loaded: no broken icon
+  const run = lastRun;
+  tmp.onload = () => { if (run !== lastRun) return;   // a late image from an earlier run
+                       img.src = tmp.src; img.hidden = false; ph.hidden = true; };
+  tmp.src = url;
+}
+function showLatest(l) {
+  // Panels belong to one run: whenever the run changes, clear both, even if this poll
+  // already carries the new run's first micrograph (the page may have missed the gap).
+  if ((l.run || null) !== lastRun) { lastRun = l.run || null; resetLatest(); }
+  if (l.t_mic && l.t_mic !== lastMic) {
+    lastMic = l.t_mic; showImg("latestMic", `api/latest/mic.png?t=${l.t_mic}`);
+    $("latestCap").textContent = `${l.micrograph} · aligned and dose-weighted by MotionCor3`;
+  }
+  if (l.t_ctf && l.t_ctf !== lastCtf) {
+    lastCtf = l.t_ctf; showImg("latestCtf", `api/latest/ctf.png?t=${l.t_ctf}`);
+    $("latestCtfCap").textContent = `CTFFIND4 fit for ${l.ctf_micrograph}: defocus ${l.defocus_um} µm, ` +
+      `rings fit to ${l.fit_A} Å (Thon rings)`;
   }
 }
 

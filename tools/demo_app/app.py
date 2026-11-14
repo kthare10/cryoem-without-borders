@@ -149,7 +149,14 @@ def run_status(d: str, c: dict) -> dict:
     ship_send = sum(float(s[4]) for s in ship)
     queued = len(glob.glob(os.path.join(d, "ship", "q", "*.txt")))
 
+    # Movies aligned so far: finished batches, plus the _DW sums of the batch in progress
+    # (done.txt only grows once a whole batch is aligned and CTF-fitted).
+    done_stems = {os.path.splitext(x)[0] for x in done}
+    in_batch = {os.path.basename(m)[:-len("_DW.mrc")] for m in glob.glob(os.path.join(d, "mics", "*_DW.mrc"))}
+    n_aligned = min(n_total or len(done) + len(in_batch), len(done) + len(in_batch - done_stems))
+
     st = {"run": os.path.basename(d), "state": state, "n_total": n_total, "n_done": len(done),
+          "n_aligned": n_aligned,
           "n_ctf": len(fits), "n_timed": n_timed, "in_bytes": in_bytes, "mc_s": mc_s, "ctf_s": ctf_s,
           "wall_s": wall_s, "movies_per_min": 60 * n_timed / mc_s if mc_s else 0,
           "ctf_median_A": good[len(good) // 2] if good else None,
@@ -242,39 +249,61 @@ def _png(img, path: str, size: int = 640) -> None:
     os.replace(tmp, path)
 
 
+SETTLE_S = 4        # a file untouched this long is fully written
+
+
 def render_latest() -> None:
-    """Background loop: when a new CTF fit appears in the newest run, render its aligned
-    micrograph (the _DW sum, kept until the batch is verified at the receiver) and the
-    CTFFIND4 diagnostic. Renders before the shipper deletes them."""
+    """Background loop over the newest run, rendering two things independently:
+    - the newest aligned micrograph (the _DW sum) as soon as MotionCor3 writes it, so the
+      page shows movies coming off the GPUs one by one;
+    - the newest CTFFIND4 diagnostic, which arrives per batch (CTF runs after a batch is
+      aligned).
+    Both render before the shipper deletes the files at the receiver's verification."""
     import mrcfile
 
     os.makedirs(CACHE, exist_ok=True)
+    seen = {"mic": None, "ctf": None}
     while True:
         try:
             for d in runs()[:1]:
+                run = os.path.basename(d)
+                now = time.time()
+                info = dict(_latest.get("info") or {})
+                if info.get("run") != run:            # a new run starts with a clean panel
+                    info = {"run": run}
+                changed = False
+
+                mics = sorted((m for m in glob.glob(os.path.join(d, "mics", "*_DW.mrc"))
+                               if now - os.path.getmtime(m) > SETTLE_S), key=os.path.getmtime)
+                if mics and seen["mic"] != f"{run}__{mics[-1]}":
+                    with mrcfile.open(mics[-1], permissive=True) as m:
+                        _png(m.data, os.path.join(CACHE, "latest_mic.png"), 768)
+                    seen["mic"] = f"{run}__{mics[-1]}"
+                    info.update(micrograph=os.path.basename(mics[-1])[:-len("_DW.mrc")], t_mic=now)
+                    changed = True
+
                 fits = sorted(glob.glob(os.path.join(d, "mics", "ctf", "*_ctf.txt")), key=os.path.getmtime)
                 for f in reversed(fits[-5:]):
                     stem = os.path.basename(f)[:-len("_ctf.txt")]
-                    key = f"{os.path.basename(d)}__{stem}"
-                    if _latest["stem"] == key:
-                        break
-                    mic = next((m for m in (os.path.join(d, "mics", f"{stem}_DW.mrc"),
-                                            os.path.join(d, "mics", f"{stem}.mrc")) if os.path.exists(m)), None)
                     diag = os.path.join(d, "mics", "ctf", f"{stem}_ctf.mrc")
-                    if not mic or not os.path.exists(diag):
+                    if seen["ctf"] == f"{run}__{stem}":
+                        break
+                    if not os.path.exists(diag):
                         continue
-                    with mrcfile.open(mic, permissive=True) as m:
-                        _png(m.data, os.path.join(CACHE, "latest_mic.png"), 768)
                     with mrcfile.open(diag, permissive=True) as m:
                         data = m.data[0] if m.data.ndim == 3 else m.data
                         _png(data, os.path.join(CACHE, "latest_ctf.png"), 512)
                     p = read(f).strip().splitlines()[-1].split()
-                    _latest.update(stem=key, t=time.time(), info={
-                        "micrograph": stem, "run": os.path.basename(d),
-                        "defocus_um": round((float(p[1]) + float(p[2])) / 2 / 1e4, 2),
-                        "astig_A": round(abs(float(p[1]) - float(p[2]))),
-                        "fit_A": round(float(p[6]), 2)})
+                    seen["ctf"] = f"{run}__{stem}"
+                    info.update(ctf_micrograph=stem, t_ctf=now,
+                                defocus_um=round((float(p[1]) + float(p[2])) / 2 / 1e4, 2),
+                                astig_A=round(abs(float(p[1]) - float(p[2]))),
+                                fit_A=round(float(p[6]), 2))
+                    changed = True
                     break
+
+                if changed or (_latest.get("info") or {}).get("run") != run:
+                    _latest.update(t=now, info=info)
         except Exception as exc:                      # never let the renderer die
             _latest["error"] = str(exc)[:200]
         time.sleep(3)
